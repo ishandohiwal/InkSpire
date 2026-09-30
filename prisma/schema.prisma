@@ -1,0 +1,228 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model
+model User {
+  id                    String      @id @default(cuid())
+  username              String      @unique
+  email                 String      @unique
+  password              String
+  avatar                String?
+  bio                   String?
+  role                  UserRole    @default(READER)
+  
+  // Token economy
+  tokensBalance         Int         @default(150)
+  subscriptionTier      SubscriptionTier @default(FREE)
+  lastTokenReset        DateTime    @default(now())
+  
+  // Relations
+  stories               Story[]
+  chapters              Chapter[]
+  inlineComments        InlineComment[]
+  votes                 Vote[]
+  readingProgress       ReadingProgress[]
+  messagesSent          Message[]     @relation("sender")
+  messagesReceived      Message[]     @relation("recipient")
+  readingLists          ReadingList[]
+  listItems             ReadingListItem[]
+  
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+}
+
+enum UserRole {
+  AUTHOR
+  READER
+}
+
+enum SubscriptionTier {
+  FREE
+  PRO
+}
+
+// Story model
+model Story {
+  id                    String      @id @default(cuid())
+  title                 String
+  slug                  String      @unique
+  description           String      @db.Text
+  coverImage            String?
+  authorId              String
+  author                User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  
+  category              String      // Romance, Sci-Fi, Fantasy, Thriller, Fanfiction, etc.
+  tags                  String[]    // e.g., ["#slowburn", "#enemies-to-lovers"]
+  maturityRating        MaturityRating @default(EVERYONE)
+  status                StoryStatus @default(ONGOING)
+  
+  totalReads            Int         @default(0)
+  totalVotes            Int         @default(0)
+  
+  chapters              Chapter[]
+  readingProgress       ReadingProgress[]
+  readingListItems      ReadingListItem[]
+  
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  
+  @@index([authorId])
+  @@index([slug])
+}
+
+enum MaturityRating {
+  EVERYONE
+  MATURE
+}
+
+enum StoryStatus {
+  ONGOING
+  COMPLETED
+  HIATUS
+}
+
+// Chapter model
+model Chapter {
+  id                    String      @id @default(cuid())
+  storyId               String
+  story                 Story       @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  authorId              String
+  author                User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  
+  chapterNumber         Int
+  title                 String
+  content               String      @db.Text
+  wordCount             Int         @default(0)
+  
+  isPublished           Boolean     @default(false)
+  publishedAt           DateTime?
+  scheduledAt           DateTime?
+  
+  votes                 Int         @default(0)
+  
+  inlineComments        InlineComment[]
+  readingProgress       ReadingProgress[]
+  
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  
+  @@unique([storyId, chapterNumber])
+  @@index([storyId])
+  @@index([authorId])
+}
+
+// Inline paragraph comments
+model InlineComment {
+  id                    String      @id @default(cuid())
+  chapterId             String
+  chapter               Chapter     @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  userId                String
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  paragraphIndex        Int         // Index of the paragraph being commented on
+  content               String      @db.Text
+  reactionEmoji         String?     // Optional emoji reaction
+  
+  replies               InlineComment[] @relation("commentReplies")
+  parentCommentId       String?
+  parentComment         InlineComment?  @relation("commentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  
+  @@index([chapterId])
+  @@index([userId])
+  @@index([parentCommentId])
+}
+
+// Vote model (one vote per user per chapter)
+model Vote {
+  id                    String      @id @default(cuid())
+  chapterId             String
+  userId                String
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt             DateTime    @default(now())
+  
+  @@unique([chapterId, userId])
+}
+
+// Reading progress tracking
+model ReadingProgress {
+  id                    String      @id @default(cuid())
+  userId                String
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storyId               String
+  story                 Story       @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  chapterId             String
+  chapter               Chapter     @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  
+  scrollPosition        Float       @default(0) // 0-1 representing % through chapter
+  tokensSpentToday      Int         @default(0)
+  lastReadAt            DateTime    @default(now()) @updatedAt
+  
+  @@unique([userId, storyId, chapterId])
+  @@index([userId])
+  @@index([storyId])
+}
+
+// Public user messages (author message boards)
+model Message {
+  id                    String      @id @default(cuid())
+  senderId              String
+  sender                User        @relation("sender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipientId           String
+  recipient             User        @relation("recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  
+  content               String      @db.Text
+  isPublic              Boolean     @default(true) // Can be displayed on recipient's profile
+  
+  createdAt             DateTime    @default(now())
+  
+  @@index([senderId])
+  @@index([recipientId])
+}
+
+// Reading lists (user curated book collections)
+model ReadingList {
+  id                    String      @id @default(cuid())
+  userId                String
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  title                 String
+  description           String?     @db.Text
+  isPublic              Boolean     @default(true)
+  
+  items                 ReadingListItem[]
+  
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  
+  @@index([userId])
+}
+
+// Items within reading lists
+model ReadingListItem {
+  id                    String      @id @default(cuid())
+  listId                String
+  list                  ReadingList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  storyId               String
+  story                 Story       @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  userId                String
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  addedAt               DateTime    @default(now())
+  
+  @@unique([listId, storyId])
+  @@index([listId])
+  @@index([storyId])
+}
